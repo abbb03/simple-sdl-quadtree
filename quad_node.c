@@ -4,8 +4,8 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
-#define QT_NODE_CAPACITY (4)
-#define MAX_ARRAY_SIZE (1024)
+#define QT_NODE_CAPACITY 4
+#define QT_MAX_LEVEL 4
 
 #define WIN_SIZE 640
 
@@ -38,15 +38,18 @@ AABB *aabb_new(point *center, float half_dimension) {
 }
 
 void aabb_free(AABB *aabb) {
-    free(&aabb->center);
+    free(aabb->center);
     free(aabb);
 }
 
 int aabb_contains_point(AABB *aabb, point *p) {
-    if (aabb->center->x + aabb->half_dimension) {
-
+    if (p->x < aabb->center->x - aabb->half_dimension || p->x > aabb->center->x + aabb->half_dimension) {
+        return 0;
     }
-    return 0;
+    if (p->y < aabb->center->y - aabb->half_dimension || p->y > aabb->center->y + aabb->half_dimension) {
+        return 0;
+    }
+    return 1;
 }
 
 int aabb_intersects_aabb() {
@@ -54,6 +57,8 @@ int aabb_intersects_aabb() {
 }
 
 typedef struct quad_node {
+    int level;
+    int curr_obj_index;
     AABB *boundary;
     point **points;
     struct quad_node *north_west;
@@ -62,8 +67,14 @@ typedef struct quad_node {
     struct quad_node *south_east;
 } quad_tree;
 
-quad_tree *quad_tree_new(AABB *boundary) {
+quad_tree *quad_tree_new(AABB *boundary, int level) {
     quad_tree *qt = (quad_tree *)malloc(sizeof(quad_tree));
+    qt->level = level;
+    qt->curr_obj_index = -1;
+    qt->points = (point **)malloc(QT_NODE_CAPACITY * sizeof(point));
+    for (int i = 0; i < QT_NODE_CAPACITY; i++) {
+        qt->points[i] = NULL;
+    }
     qt->boundary = boundary;
     qt->north_west = NULL;
     qt->north_east = NULL;
@@ -71,6 +82,66 @@ quad_tree *quad_tree_new(AABB *boundary) {
     qt->south_east = NULL;
 
     return qt;
+}
+
+int quad_tree_count_objects(quad_tree *qt) {
+    int i = 0;
+    while (qt->points[i] != NULL && i < QT_NODE_CAPACITY) {
+        i++;
+    }
+
+    return i;
+}
+
+quad_tree *quad_tree_subdivide(quad_tree *qt) {
+    float half_dim = qt->boundary->half_dimension / 2;
+    // North West
+    point *nw_p = point_new(qt->boundary->center->x - half_dim, qt->boundary->center->y + half_dim);
+    qt->north_west = quad_tree_new(aabb_new(nw_p, half_dim), 0);
+    
+    // North East
+    point *ne_p = point_new(qt->boundary->center->x + half_dim, qt->boundary->center->y + half_dim);
+    qt->north_east = quad_tree_new(aabb_new(ne_p, half_dim), 0);
+    
+    // South West
+    point *sw_p = point_new(qt->boundary->center->x - half_dim, qt->boundary->center->y - half_dim);
+    qt->south_west = quad_tree_new(aabb_new(sw_p, half_dim), 0);
+    
+    // South East
+    point *se_p = point_new(qt->boundary->center->x + half_dim, qt->boundary->center->y - half_dim);
+    qt->south_east = quad_tree_new(aabb_new(se_p, half_dim), 0);
+
+    return qt;
+}
+
+int quad_tree_insert(quad_tree *qt, point *p) {
+    if (!aabb_contains_point(qt->boundary, p)) {
+        return 0;
+    }
+
+    if (++qt->curr_obj_index < QT_NODE_CAPACITY && qt->north_west == NULL) {
+        qt->points[qt->curr_obj_index] = p;
+        return 1;
+    }
+
+    if (qt->north_west == NULL) {
+        quad_tree_subdivide(qt);
+    }
+
+    if (quad_tree_insert(qt->north_west, p)) {
+        return 1;
+    }
+    if (quad_tree_insert(qt->north_east, p)) {
+        return 1;
+    }
+    if (quad_tree_insert(qt->south_west, p)) {
+        return 1;
+    }
+    if (quad_tree_insert(qt->south_east, p)) {
+        return 1;
+    }
+
+    return 0;
 }
 
 void quad_tree_draw_bounds(SDL_Renderer *r, quad_tree *qt) {
@@ -116,12 +187,45 @@ void quad_tree_draw_bounds(SDL_Renderer *r, quad_tree *qt) {
     }
 }
 
+void quad_tree_draw_points(SDL_Renderer *r, quad_tree *qt) {
+    int count_objects = quad_tree_count_objects(qt);
+    for (int i = 0; i < count_objects; i++) {
+        SDL_RenderDrawPoint(r, qt->points[i]->x, qt->points[i]->y);
+    }
+
+    if (qt->north_west != NULL) {
+        quad_tree_draw_points(r, qt->north_west);
+    }
+    if (qt->north_east != NULL) {
+        quad_tree_draw_points(r, qt->north_west);
+    }
+    if (qt->south_west != NULL) {
+        quad_tree_draw_points(r, qt->north_west);
+    }
+    if (qt->south_east != NULL) {
+        quad_tree_draw_points(r, qt->north_west);
+    }
+}
+
 void quad_tree_free(quad_tree *qt) {
-    free(qt->boundary);
-    free(qt->north_west);
-    free(qt->north_east);
-    free(qt->south_west);
-    free(qt->south_east);
+    aabb_free(qt->boundary);
+    for (int i = 0; i < QT_NODE_CAPACITY; i++) {
+        free(qt->points[i]);
+    }
+
+    if (qt->north_west != NULL) {
+        quad_tree_free(qt->north_west);
+    }
+    if (qt->north_east != NULL) {
+        quad_tree_free(qt->north_east);
+    }
+    if (qt->south_west != NULL) {
+        quad_tree_free(qt->south_west);
+    }
+    if (qt->south_east != NULL) {
+        quad_tree_free(qt->south_east);
+    }
+
     free(qt);
 }
 
@@ -132,15 +236,7 @@ int main() {
 
     point *center = point_new(WIN_SIZE / 2, WIN_SIZE / 2);
     AABB *aabb = aabb_new(center, WIN_SIZE / 2);
-    quad_tree *qt = quad_tree_new(aabb);
-
-    point *center2 = point_new(center->x / 2, center->y / 2);
-    AABB *aabb2 = aabb_new(center2 , aabb->half_dimension / 2);
-    qt->north_west = quad_tree_new(aabb2);
-
-    point *center3 = point_new(center2->x / 2, center2->y / 2);
-    AABB *aabb3 = aabb_new(center3 , aabb2->half_dimension / 2);
-    qt->north_west->north_west = quad_tree_new(aabb3);
+    quad_tree *qt = quad_tree_new(aabb, 0);
 
     int running = 1;
     SDL_Event event;
@@ -150,12 +246,23 @@ int main() {
             case SDL_QUIT:
                 running = 0;
                 break;
+            case SDL_MOUSEBUTTONDOWN:
+                printf ("MOUSE CLICK\n");
+                int x, y;
+                SDL_GetMouseState( &x, &y );
+                if (SDL_MOUSEBUTTONDOWN) {
+                    point *pp = (point *)malloc(sizeof(point));
+                    pp->x = x;
+                    pp->y = y;
+                    quad_tree_insert(qt, pp);
+                }
+                break;
             }
         }
 
         SDL_RenderClear(renderer);
         SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
-        SDL_RenderDrawPoint(renderer, 25, 25);
+        quad_tree_draw_points(renderer, qt);
         quad_tree_draw_bounds(renderer, qt);
         SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0xFF);
         SDL_RenderPresent(renderer);
