@@ -5,7 +5,7 @@
 #include <SDL2/SDL_image.h>
 
 #define QT_NODE_CAPACITY 4
-#define QT_MAX_LEVEL 4
+#define QT_MAX_LEVEL 6
 
 #define WIN_SIZE 640
 
@@ -98,19 +98,19 @@ quad_tree *quad_tree_subdivide(quad_tree *qt) {
     
     // North West
     point *nw_p = point_new(qt->boundary->center->x - half_dim, qt->boundary->center->y - half_dim);
-    qt->north_west = quad_tree_new(aabb_new(nw_p, half_dim), 0);
+    qt->north_west = quad_tree_new(aabb_new(nw_p, half_dim), qt->level + 1);
 
     // North East
     point *ne_p = point_new(qt->boundary->center->x, qt->boundary->center->y - half_dim);
-    qt->north_east = quad_tree_new(aabb_new(ne_p, half_dim), 0);
+    qt->north_east = quad_tree_new(aabb_new(ne_p, half_dim), qt->level + 1);
 
     // South West
     point *sw_p = point_new(qt->boundary->center->x - half_dim, qt->boundary->center->y);
-    qt->south_west = quad_tree_new(aabb_new(sw_p, half_dim), 0);
+    qt->south_west = quad_tree_new(aabb_new(sw_p, half_dim), qt->level + 1);
     
     // South East
     point *se_p = point_new(qt->boundary->center->x, qt->boundary->center->y);
-    qt->south_east = quad_tree_new(aabb_new(se_p, half_dim), 0);
+    qt->south_east = quad_tree_new(aabb_new(se_p, half_dim), qt->level + 1);
 
     return qt;
 }
@@ -120,33 +120,31 @@ int quad_tree_insert(quad_tree *qt, point *p) {
         return 0;
     }
 
-    if (++qt->curr_obj_index < QT_NODE_CAPACITY && qt->north_west == NULL) {
+    if (qt->level >= QT_MAX_LEVEL) {
+        qt->points[qt->curr_obj_index % QT_NODE_CAPACITY] = p;
+        return 1;
+    }
+
+    if (++qt->curr_obj_index < QT_NODE_CAPACITY) {
         qt->points[qt->curr_obj_index] = p;
         return 1;
     }
 
-    if (qt->north_west == NULL) {
+    if (qt->north_west == NULL && qt->level < QT_MAX_LEVEL) {
         quad_tree_subdivide(qt);
-        printf("NW:\nX: %d; Y: %d\n", qt->north_west->boundary->center->x,qt->north_west->boundary->center->y);
-        printf("NE:\nX: %d; Y: %d\n", qt->north_east->boundary->center->x,qt->north_east->boundary->center->y);
-        printf("SW:\nX: %d; Y: %d\n", qt->south_west->boundary->center->x,qt->south_west->boundary->center->y);
-        printf("SE:\nX: %d; Y: %d\n", qt->south_east->boundary->center->x,qt->south_east->boundary->center->y);
+        printf("Subdivided!\n");
     }
 
     if (quad_tree_insert(qt->north_west, p)) {
-        printf("NW:\nX: %d; Y: %d\n", qt->north_west->boundary->center->x,qt->north_west->boundary->center->y);
         return 1;
     }
     if (quad_tree_insert(qt->north_east, p)) {
-        printf("NE:\nX: %d; Y: %d\n", qt->north_east->boundary->center->x,qt->north_east->boundary->center->y);
         return 1;
     }
     if (quad_tree_insert(qt->south_west, p)) {
-        printf("SW:\nX: %d; Y: %d\n", qt->south_west->boundary->center->x,qt->south_west->boundary->center->y);
         return 1;
     }
     if (quad_tree_insert(qt->south_east, p)) {
-        printf("SE:\nX: %d; Y: %d\n", qt->south_east->boundary->center->x,qt->south_east->boundary->center->y);
         return 1;
     }
 
@@ -231,7 +229,7 @@ int main() {
 
     point *center = point_new(WIN_SIZE, WIN_SIZE);
     AABB *aabb = aabb_new(center, WIN_SIZE);
-    quad_tree *qt = quad_tree_new(aabb, 0);
+    quad_tree *qt = quad_tree_new(aabb, 1);
     
     int running = 1;
     SDL_Event event;
